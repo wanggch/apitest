@@ -1,6 +1,8 @@
 package report
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -92,7 +94,7 @@ func writeStep(writeLine func(string), step runner.StepResult) {
 	if step.Request.Body != "" {
 		writeLine("- Body:")
 		writeLine("```")
-		writeLine(truncateBody(maskBody(step.Request.Body)))
+		writeLine(truncateBody(formatBody(maskBody(step.Request.Body))))
 		writeLine("```")
 	}
 
@@ -107,7 +109,7 @@ func writeStep(writeLine func(string), step runner.StepResult) {
 		}
 	}
 	if step.Response.Body != "" {
-		bodyText := truncateBody(maskBody(step.Response.Body))
+		bodyText := truncateBody(formatBody(maskBody(step.Response.Body)))
 		if step.Response.BodyTruncated {
 			bodyText += "\n... (truncated)"
 		}
@@ -163,4 +165,16 @@ func maskBody(body string) string {
 		replacer = re.ReplaceAllString(replacer, "$1$2[masked]")
 	}
 	return replacer
+}
+
+// formatBody prettifies JSON bodies for readability; falls back to original text on failure.
+func formatBody(body string) string {
+	if body == "" {
+		return body
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, []byte(body), "", "  "); err != nil {
+		return body
+	}
+	return buf.String()
 }

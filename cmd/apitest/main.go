@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -90,6 +91,7 @@ func execute(planFile, output, baseURL string, insecure, verbose bool, envFile s
 		Vars:     allVars,
 		Insecure: insecure,
 		Verbose:  verbose,
+		Progress: printProgress,
 	})
 
 	if err := ensureDir(output); err != nil {
@@ -142,4 +144,25 @@ func ensureDir(path string) error {
 		return nil
 	}
 	return os.MkdirAll(dir, 0o755)
+}
+
+// printProgress renders a short progress log to the terminal to keep users informed.
+func printProgress(evt runner.ProgressEvent) {
+	switch evt.Type {
+	case runner.ProgressStepStart:
+		fmt.Printf("[%d/%d] Running %s...\n", evt.StepIndex, evt.StepTotal, evt.StepName)
+	case runner.ProgressStepDone:
+		status := "PASS"
+		if !evt.Success {
+			status = "FAIL"
+		}
+		msg := fmt.Sprintf("[%d/%d] %s %s", evt.StepIndex, evt.StepTotal, evt.StepName, status)
+		if evt.Duration > 0 {
+			msg = fmt.Sprintf("%s (%s)", msg, evt.Duration.Round(time.Millisecond))
+		}
+		if evt.Error != "" {
+			msg = fmt.Sprintf("%s - %s", msg, evt.Error)
+		}
+		fmt.Println(msg)
+	}
 }

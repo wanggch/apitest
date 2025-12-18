@@ -21,7 +21,28 @@ type RunnerOptions struct {
 	Vars     map[string]string
 	Insecure bool
 	Verbose  bool
+	// Progress, when provided, receives lifecycle notifications for each step.
+	Progress func(ProgressEvent)
 }
+
+// ProgressEvent describes a lifecycle update while executing steps.
+type ProgressEvent struct {
+	Type      ProgressType
+	StepName  string
+	StepIndex int
+	StepTotal int
+	Duration  time.Duration
+	Success   bool
+	Error     string
+}
+
+// ProgressType indicates which lifecycle message is being emitted.
+type ProgressType string
+
+const (
+	ProgressStepStart ProgressType = "step_start"
+	ProgressStepDone  ProgressType = "step_done"
+)
 
 // Result captures execution outcome.
 type Result struct {
@@ -54,6 +75,7 @@ func Execute(plan *config.Plan, opts RunnerOptions) Result {
 	if opts.BaseURL != "" {
 		baseURL = opts.BaseURL
 	}
+	stepTotal := len(plan.Steps)
 
 	ctx := make(map[string]string)
 	for k, v := range plan.Vars {
@@ -61,8 +83,15 @@ func Execute(plan *config.Plan, opts RunnerOptions) Result {
 	}
 	ctx = templ.MergeContexts(ctx, opts.Vars)
 
-	for _, step := range plan.Steps {
+	for i, step := range plan.Steps {
 		sr := StepResult{Name: step.Name, StartTime: time.Now(), Success: true, Extracted: map[string]string{}}
+		stepIndex := i + 1
+		notifyProgress(opts.Progress, ProgressEvent{
+			Type:      ProgressStepStart,
+			StepName:  step.Name,
+			StepIndex: stepIndex,
+			StepTotal: stepTotal,
+		})
 		if opts.Verbose {
 			fmt.Printf("==> Step: %s\n", step.Name)
 		}
@@ -70,10 +99,19 @@ func Execute(plan *config.Plan, opts RunnerOptions) Result {
 		reqInfo, respInfo, err := httpx.DoRequest(context.Background(), client, baseURL, step.Request, ctx)
 		sr.Request = reqInfo
 		sr.Response = respInfo
-		sr.EndTime = time.Now()
 		if err != nil {
 			sr.Success = false
 			sr.Error = err.Error()
+			sr.EndTime = time.Now()
+			notifyProgress(opts.Progress, ProgressEvent{
+				Type:      ProgressStepDone,
+				StepName:  step.Name,
+				StepIndex: stepIndex,
+				StepTotal: stepTotal,
+				Duration:  sr.EndTime.Sub(sr.StartTime),
+				Success:   sr.Success,
+				Error:     sr.Error,
+			})
 			res.Steps = append(res.Steps, sr)
 			res.Success = false
 			res.FailedStep = step.Name
@@ -104,6 +142,16 @@ func Execute(plan *config.Plan, opts RunnerOptions) Result {
 				ctx[k] = v
 			}
 		}
+		sr.EndTime = time.Now()
+		notifyProgress(opts.Progress, ProgressEvent{
+			Type:      ProgressStepDone,
+			StepName:  step.Name,
+			StepIndex: stepIndex,
+			StepTotal: stepTotal,
+			Duration:  sr.EndTime.Sub(sr.StartTime),
+			Success:   sr.Success,
+			Error:     sr.Error,
+		})
 
 		if !sr.Success {
 			res.Success = false
@@ -185,4 +233,12 @@ func extractValue(def config.ExtractDefinition, resp httpx.ResponseInfo) (string
 	default:
 		return "", fmt.Errorf("unknown extract from %s", def.From)
 	}
+}
+
+// notifyProgress safely invokes the provided progress callback when it exists.
+func notifyProgress(cb func(ProgressEvent), event ProgressEvent) {
+	if cb == nil {
+		return
+	}
+	cb(event)
 }
