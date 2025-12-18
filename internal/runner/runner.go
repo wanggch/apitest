@@ -57,7 +57,7 @@ func Execute(plan *config.Plan, opts RunnerOptions) Result {
 
 	ctx := make(map[string]string)
 	for k, v := range plan.Vars {
-		ctx[k] = fmt.Sprint(v)
+		ctx[normalizeVarKey(k)] = fmt.Sprint(v)
 	}
 	ctx = templ.MergeContexts(ctx, opts.Vars)
 
@@ -123,6 +123,17 @@ func Execute(plan *config.Plan, opts RunnerOptions) Result {
 
 	res.EndTime = time.Now()
 	return res
+}
+
+func normalizeVarKey(key string) string {
+	key = strings.TrimSpace(key)
+	if len(key) >= 2 {
+		if (strings.HasPrefix(key, "\"") && strings.HasSuffix(key, "\"")) ||
+			(strings.HasPrefix(key, "'") && strings.HasSuffix(key, "'")) {
+			return key[1 : len(key)-1]
+		}
+	}
+	return key
 }
 
 func runExtract(defs map[string]config.ExtractDefinition, resp httpx.ResponseInfo, out map[string]string) error {

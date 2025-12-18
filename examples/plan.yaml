@@ -1,34 +1,42 @@
 name: "Demo Plan"
-base_url: "https://example.com"
+base_url: "http://localhost:8081"
 vars:
-  username: "alice"
-  password: "123456"
+  tenantId: "000000"
+  "phoneNumber": "13021788888"
+  "smsCode": "666688"
+  "userType": "sys_user"
+  clientId: "e5cd7e4891bf95d1d19206ce24a7b32e"
+  "grantType": "sms"
 
 steps:
   - name: "login"
     request:
       method: "POST"
-      url: "/api/login"
+      url: "/auth/login"
       headers:
         Content-Type: "application/json"
       body:
         json:
-          username: "{{username}}"
-          password: "{{password}}"
+          tenantId: "{{tenantId}}"
+          phoneNumber: "{{phoneNumber}}"
+          smsCode: "{{smsCode}}"
+          userType: "{{userType}}"
+          clientId: "{{clientId}}"
+          grantType: "{{grantType}}"
       timeout_ms: 5000
     extract:
       token:
         from: "json"
-        path: "data.token"
-      user_id:
-        from: "json"
-        path: "data.user.id"
+        path: "data.access_token"
+      # user_id:
+      #   from: "json"
+      #   path: "data.user.id"
     assert:
       - type: "status"
         op: "=="
         expect: 200
       - type: "json"
-        path: "data.token"
+        path: "data.access_token"
         op: "exists"
       - type: "header"
         name: "Content-Type"
@@ -38,14 +46,74 @@ steps:
   - name: "get profile"
     request:
       method: "GET"
-      url: "/api/users/{{user_id}}"
+      url: "/system/user/getInfo"
       headers:
         Authorization: "Bearer {{token}}"
+        clientid: "{{clientId}}"
     assert:
       - type: "status"
         op: "=="
         expect: 200
       - type: "json"
-        path: "data.id"
+        path: "data.user.userId"
+        op: "exists"
+
+  - name: "menu routers"
+    request:
+      method: "GET"
+      url: "/system/menu/getRouters"
+      headers:
+        Authorization: "Bearer {{token}}"
+        clientid: "{{clientId}}"
+    assert:
+      - type: "status"
         op: "=="
-        expect: "{{user_id}}"
+        expect: 200
+      - type: "json"
+        path: "data"
+        op: "exists"
+
+  - name: "dict data: classes_grade"
+    request:
+      method: "GET"
+      url: "/system/dict/data/type/classes_grade"
+      headers:
+        Authorization: "Bearer {{token}}"
+        clientid: "{{clientId}}"
+    assert:
+      - type: "status"
+        op: "=="
+        expect: 200
+      - type: "json"
+        path: "data"
+        op: "exists"
+
+  - name: "tenant list"
+    request:
+      method: "GET"
+      url: "/auth/tenant/list"
+      headers:
+        Authorization: "Bearer {{token}}"
+        clientid: "{{clientId}}"
+    assert:
+      - type: "status"
+        op: "=="
+        expect: 200
+      - type: "json"
+        path: "data.voList"
+        op: "exists"
+
+  - name: "class list"
+    request:
+      method: "GET"
+      url: "/tuoyu/classManagement/list?pageNum=1&pageSize=100"
+      headers:
+        Authorization: "Bearer {{token}}"
+        clientid: "{{clientId}}"
+    assert:
+      - type: "status"
+        op: "=="
+        expect: 200
+      - type: "json"
+        path: "data.rows"
+        op: "exists"

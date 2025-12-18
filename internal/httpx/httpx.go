@@ -55,13 +55,17 @@ func BuildClient(timeout time.Duration, insecure bool) *http.Client {
 
 // DoRequest builds and executes HTTP request based on config.
 func DoRequest(ctx context.Context, client *http.Client, baseURL string, req config.Request, vars map[string]string) (RequestInfo, ResponseInfo, error) {
-	ri := RequestInfo{Headers: map[string]string{}, Query: map[string]string{}}
-
-	// method
 	method := req.Method
 	if method == "" {
 		method = http.MethodGet
 	}
+	ri := RequestInfo{
+		Method:  method,
+		URL:     req.URL,
+		Headers: map[string]string{},
+		Query:   map[string]string{},
+	}
+
 	// url
 	resolvedURL, err := templ.ApplyString(req.URL, vars)
 	if err != nil {
@@ -74,10 +78,12 @@ func DoRequest(ctx context.Context, client *http.Client, baseURL string, req con
 			resolvedURL = strings.TrimRight(baseURL, "/") + resolvedURL
 		}
 	}
+	ri.URL = resolvedURL
 	// query
 	query := url.Values{}
 	for k, v := range req.Query {
 		strVal := fmt.Sprint(v)
+		ri.Query[k] = strVal
 		repl, err := templ.ApplyString(strVal, vars)
 		if err != nil {
 			return ri, ResponseInfo{}, fmt.Errorf("query %s: %w", k, err)
@@ -92,10 +98,12 @@ func DoRequest(ctx context.Context, client *http.Client, baseURL string, req con
 			resolvedURL += "?" + query.Encode()
 		}
 	}
+	ri.URL = resolvedURL
 
 	// headers
 	hdr := http.Header{}
 	for k, v := range req.Headers {
+		ri.Headers[k] = v
 		repl, err := templ.ApplyString(v, vars)
 		if err != nil {
 			return ri, ResponseInfo{}, fmt.Errorf("header %s: %w", k, err)
@@ -124,11 +132,14 @@ func DoRequest(ctx context.Context, client *http.Client, baseURL string, req con
 		case req.Body.Raw != "":
 			var err error
 			bodyText, err = templ.ApplyString(req.Body.Raw, vars)
+			ri.Body = bodyText
 			if err != nil {
 				return ri, ResponseInfo{}, fmt.Errorf("body raw: %w", err)
 			}
 			body = strings.NewReader(bodyText)
 		case req.Body.JSON != nil:
+			ri.Body = marshalPreview(req.Body.JSON, vars)
+
 			replaced, err := templ.ApplyInterface(req.Body.JSON, vars)
 			if err != nil {
 				return ri, ResponseInfo{}, fmt.Errorf("body json: %w", err)
@@ -142,12 +153,17 @@ func DoRequest(ctx context.Context, client *http.Client, baseURL string, req con
 			if hdr.Get("Content-Type") == "" {
 				hdr.Set("Content-Type", "application/json")
 			}
+			ri.Body = bodyText
 		case req.Body.Form != nil:
+			ri.Body = encodeFormPreview(req.Body.Form, vars)
+
 			vals := url.Values{}
 			for k, v := range req.Body.Form {
 				s := fmt.Sprint(v)
 				repl, err := templ.ApplyString(s, vars)
 				if err != nil {
+					vals.Set(k, repl)
+					ri.Body = vals.Encode()
 					return ri, ResponseInfo{}, fmt.Errorf("body form %s: %w", k, err)
 				}
 				vals.Set(k, repl)
@@ -158,6 +174,7 @@ func DoRequest(ctx context.Context, client *http.Client, baseURL string, req con
 			if hdr.Get("Content-Type") == "" {
 				hdr.Set("Content-Type", "application/x-www-form-urlencoded")
 			}
+			ri.Body = bodyText
 		}
 	}
 
@@ -209,4 +226,54 @@ func DoRequest(ctx context.Context, client *http.Client, baseURL string, req con
 		BodyTruncated: truncated,
 		Duration:      duration,
 	}, nil
+}
+
+// marshalPreview renders a JSON body with best-effort template substitution
+// so that reporting can show resolved values even if a missing variable stops execution.
+func marshalPreview(data interface{}, vars map[string]string) string {
+	pre := applyInterfacePartial(data, vars)
+	b, err := json.Marshal(pre)
+	if err != nil {
+		return fmt.Sprint(pre)
+	}
+	return string(b)
+}
+
+// encodeFormPreview builds a URL-encoded form string with best-effort substitutions.
+func encodeFormPreview(form map[string]interface{}, vars map[string]string) string {
+	vals := url.Values{}
+	for k, v := range form {
+		val := fmt.Sprint(v)
+		vals.Set(k, applyStringPartial(val, vars))
+	}
+	return vals.Encode()
+}
+
+func applyStringPartial(s string, vars map[string]string) string {
+	out, err := templ.ApplyString(s, vars)
+	if err != nil {
+		return out
+	}
+	return out
+}
+
+func applyInterfacePartial(data interface{}, vars map[string]string) interface{} {
+	switch v := data.(type) {
+	case string:
+		return applyStringPartial(v, vars)
+	case []interface{}:
+		res := make([]interface{}, 0, len(v))
+		for _, item := range v {
+			res = append(res, applyInterfacePartial(item, vars))
+		}
+		return res
+	case map[string]interface{}:
+		res := make(map[string]interface{}, len(v))
+		for k, item := range v {
+			res[k] = applyInterfacePartial(item, vars)
+		}
+		return res
+	default:
+		return v
+	}
 }
