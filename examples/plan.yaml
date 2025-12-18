@@ -1,0 +1,51 @@
+name: "Demo Plan"
+base_url: "https://example.com"
+vars:
+  username: "alice"
+  password: "123456"
+
+steps:
+  - name: "login"
+    request:
+      method: "POST"
+      url: "/api/login"
+      headers:
+        Content-Type: "application/json"
+      body:
+        json:
+          username: "{{username}}"
+          password: "{{password}}"
+      timeout_ms: 5000
+    extract:
+      token:
+        from: "json"
+        path: "data.token"
+      user_id:
+        from: "json"
+        path: "data.user.id"
+    assert:
+      - type: "status"
+        op: "=="
+        expect: 200
+      - type: "json"
+        path: "data.token"
+        op: "exists"
+      - type: "header"
+        name: "Content-Type"
+        op: "contains"
+        expect: "application/json"
+
+  - name: "get profile"
+    request:
+      method: "GET"
+      url: "/api/users/{{user_id}}"
+      headers:
+        Authorization: "Bearer {{token}}"
+    assert:
+      - type: "status"
+        op: "=="
+        expect: 200
+      - type: "json"
+        path: "data.id"
+        op: "=="
+        expect: "{{user_id}}"
